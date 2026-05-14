@@ -26,6 +26,7 @@ import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
+import { getCurrentLogPath, getLogsDir, initFileLogger, logToFile } from "./logger.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import { installPackageGloballyAsync } from "./npm-update-utils.js";
 import { registerUploadRoutes } from "./upload-routes.js";
@@ -530,6 +531,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 function wandError(label: string, message: string, suggestion?: string): void {
+  logToFile("error", `${label}: ${message}${suggestion ? ` | suggestion: ${suggestion}` : ""}`);
   if (isLogBusActive()) {
     wandTuiLog("error", `✗ [wand] ${label}：${message}`);
     if (suggestion) wandTuiLog("error", `  解决方法：${suggestion}`);
@@ -541,6 +543,7 @@ function wandError(label: string, message: string, suggestion?: string): void {
 }
 
 function wandWarn(message: string, hint?: string): void {
+  logToFile("warn", `${message}${hint ? ` | hint: ${hint}` : ""}`);
   if (isLogBusActive()) {
     wandTuiLog("warn", `⚠️  [wand] 警告：${message}`);
     if (hint) wandTuiLog("warn", `  提示：${hint}`);
@@ -548,6 +551,15 @@ function wandWarn(message: string, hint?: string): void {
   }
   process.stderr.write(`⚠️  [wand] 警告：${message}\n`);
   if (hint) process.stderr.write(`  提示：${hint}\n`);
+}
+
+function wandLog(message: string): void {
+  logToFile("info", message);
+  if (isLogBusActive()) {
+    wandTuiLog("info", `[wand] ${message}`);
+    return;
+  }
+  process.stdout.write(`[wand] ${message}\n`);
 }
 
 // ── Recent path types ──
@@ -744,6 +756,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
   const configDir = resolveConfigDir(configPath);
+  initFileLogger(configDir);
   const avatarSeed = await ensureAvatarSeed(configDir);
   const processes = new ProcessManager(config, storage, configDir);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
@@ -1852,6 +1865,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         collectedUrls.push({ url: `${protocol}://0.0.0.0:${config.port}`, scheme });
       } else if (config.host !== "127.0.0.1" && config.host !== "localhost") {
         collectedUrls.push({ url: `${protocol}://${config.host}:${config.port}`, scheme });
+      }
+      const logsDir = getLogsDir();
+      const currentLog = getCurrentLogPath();
+      if (logsDir) {
+        wandLog(`Server listening on ${scheme} ${bindAddr} (pid ${process.pid}, version ${PKG_VERSION})`);
+        wandLog(`Logs: ${currentLog ?? logsDir} (rotated daily, kept for 7 days)`);
       }
       resolve();
     });
